@@ -1763,7 +1763,7 @@ use  "${Nigeria_GHS_W4_created_data}/Nigeria_GHS_W4_all_plots.dta",clear
 sort hhid plot_id
 count
 count if cropcode==1080
-*keep if cropcode==1080
+keep if cropcode==1080
 
 order hhid plot_id cropcode quant_harv_kg value_harvest ha_harvest percent_inputs field_size purestand
 
@@ -1783,7 +1783,7 @@ use "${Nigeria_GHS_W5_created_data}/Nigeria_GHS_W5_all_plots.dta",clear
 sort hhid 
 count
 count if cropcode==1080
-*keep if cropcode==1080
+keep if cropcode==1080
 
 order hhid plot_id cropcode quant_harv_kg value_harvest ha_harvest percent_inputs field_size purestand
 

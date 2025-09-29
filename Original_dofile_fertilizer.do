@@ -14,7 +14,7 @@ global Nigeria_GHS_W5_raw_data 		"C:\Users\obine\Music\Documents\Smallholder lsm
 global Nigeria_GHS_W5_created_data  "C:\Users\obine\Music\Documents\food_secure\evans"
 
 
-
+//demographics, labor age, distance
 
 
 ********************************************************************************
@@ -515,7 +515,7 @@ la var fdspiceby "Spices and condiments auto-consumption"
 la var fdothpr "Food items not mentioned above auto-consumption"
 
 
-merge 1:1 hhid using `hhexp', nogen
+*merge 1:1 hhid using `hhexp', nogen
 unab varlist : *_def 
 local vars_nom : subinstr local varlist "_def" "", all 
 egen totcons = rowtotal(`vars_nom')
@@ -856,7 +856,7 @@ la var fdspiceby "Spices and condiments auto-consumption"
 la var fdothpr "Food items not mentioned above auto-consumption"
 
 
-merge 1:1 hhid using `hhexp', nogen
+*merge 1:1 hhid using `hhexp', nogen
 unab varlist : *_def 
 local vars_nom : subinstr local varlist "_def" "", all 
 egen totcons = rowtotal(`vars_nom')
@@ -881,7 +881,8 @@ ren totcons totcons_ph
 ren totcons_def totcons_def_ph
 ren totcons_pc totcons_pc_ph 
 ren totcons_adj totcons_adj_ph 
-gen totcons = (totcons_pp+totcons_ph)/2
+//gen totcons = (totcons_pp+totcons_ph)/2
+gen totcons = totcons_pp/2
 gen totcons_def = (totcons_def_pp+totcons_def_ph)/2
 gen totcons_pc = (totcons_pc_pp+totcons_pc_ph)/2
 gen totcons_adj = (totcons_adj_ph+totcons_pc_pp)/2
@@ -938,12 +939,214 @@ save "${Nigeria_GHS_W5_created_data}/Nigeria_GHS_W5_food_insecurity.dta", replac
 
 
 
+*******************************
+*Soil Quality
+*******************************
+*starting with planting
+//ALT IMPORTANT NOTE: As of w5, the implied area conversions for farmer estimated units (including hectares) are markedly different from previous waves. I recommend excluding plots that do not have GPS measured areas from any area-based productivity estimates.
+use "${Nigeria_GHS_W5_raw_data}/sect11a1_plantingw5.dta", clear
+*merging in planting section to get cultivated status
+merge 1:1 hhid plotid using "${Nigeria_GHS_W5_raw_data}/sect11b1_plantingw5.dta", nogen
+*merging in harvest section to get areas for new plots
+merge 1:1 hhid plotid using "${Nigeria_GHS_W5_raw_data}/secta1_harvestw5.dta", gen(plot_merge)
+ren s11aq3_number area_size
+ren s11aq3_unit area_unit
+ren sa1q1c area_size2 //GPS measurement, no units in file
+//ren sa1q9b area_unit2 //Not in file
+ren s11mq3 area_meas_sqm
+//ren sa1q9c area_meas_sqm2
+gen cultivate = sa1q1a ==1 
+
+gen field_size= area_size if area_unit==6
+replace field_size = area_size*0.0667 if area_unit==4									//reported in plots
+replace field_size = area_size*0.404686 if area_unit==5		    						//reported in acres
+replace field_size = area_size*0.0001 if area_unit==7									//reported in square meters
+replace field_size = area_size*0.09290304 if area_unit==8
+replace field_size = area_size*0.04645152 if area_unit==9
+replace field_size = area_size*0.721159848 if area_unit==10
+
+replace field_size = area_size*0.00012 if area_unit==1 & zone==1						//reported in heaps
+replace field_size = area_size*0.00016 if area_unit==1 & zone==2
+replace field_size = area_size*0.00011 if area_unit==1 & zone==3
+replace field_size = area_size*0.00019 if area_unit==1 & zone==4
+replace field_size = area_size*0.00021 if area_unit==1 & zone==5
+replace field_size = area_size*0.00012 if area_unit==1 & zone==6
+
+replace field_size = area_size*0.0027 if area_unit==2 & zone==1							//reported in ridges
+replace field_size = area_size*0.004 if area_unit==2 & zone==2
+replace field_size = area_size*0.00494 if area_unit==2 & zone==3
+replace field_size = area_size*0.0023 if area_unit==2 & zone==4
+replace field_size = area_size*0.0023 if area_unit==2 & zone==5
+replace field_size = area_size*0.00001 if area_unit==2 & zone==6
+
+replace field_size = area_size*0.00006 if area_unit==3 & zone==1						//reported in stands
+replace field_size = area_size*0.00016 if area_unit==3 & zone==2
+replace field_size = area_size*0.00004 if area_unit==3 & zone==3
+replace field_size = area_size*0.00004 if area_unit==3 & zone==4
+replace field_size = area_size*0.00013 if area_unit==3 & zone==5
+replace field_size = area_size*0.00041 if area_unit==3 & zone==6
+
+/*ALT 02.23.23*/ gen area_est = field_size
+*replacing farmer reported with GPS if available
+replace field_size =  area_meas_sqm*0.0001 if area_meas_sqm!=.
+        				
+gen gps_meas = (area_meas_sqm!=. & area_meas_sqm !=0)
+la var gps_meas "Plot was measured with GPS, 1=Yes"
+keep zone state lga sector ea hhid plotid field_size
+
+merge 1:1 hhid plotid using "${Nigeria_GHS_W5_raw_data}\sect11b1_plantingw5.dta"
+*merge m:1 hhid using "${Nigeria_GHS_W4_created_data}/ag_rainy_18.dta", gen(filter)
+
+*keep if ag_rainy_18==1
+
+ren s11b1q62 soil_quality
+tab soil_quality, missing
+order field_size soil_quality hhid 
+sort hhid
+
+
+egen max_fieldsize = max(field_size), by (hhid)
+replace max_fieldsize= . if max_fieldsize!= max_fieldsize
+order field_size soil_quality hhid max_fieldsize
+sort hhid
+keep if field_size== max_fieldsize
+sort hhid plotid field_size
+
+duplicates report hhid
+
+duplicates tag hhid, generate(dup)
+tab dup
+list field_size soil_quality dup
+
+
+list hhid plotid field_size soil_quality dup if dup>0
+
+egen soil_qty_rev = max(soil_quality) 
+gen soil_qty_rev2 = soil_quality
+
+replace soil_qty_rev2 = soil_qty_rev if dup>0
+
+list hhid plotid  field_size soil_quality soil_qty_rev soil_qty_rev2 dup if dup>0
+
+
+
+egen med_soil_ea = median(soil_qty_rev2), by (ea)
+egen med_soil_lga = median(soil_qty_rev2), by (lga)
+egen med_soil_state = median(soil_qty_rev2), by (state)
+egen med_soil_zone = median(soil_qty_rev2), by (zone)
+
+replace soil_qty_rev2= med_soil_ea if soil_qty_rev2==.
+tab soil_qty_rev2, missing
+replace soil_qty_rev2= med_soil_lga if soil_qty_rev2==.
+tab soil_qty_rev2, missing
+replace soil_qty_rev2= med_soil_state if soil_qty_rev2==.
+tab soil_qty_rev2, missing
+replace soil_qty_rev2= med_soil_zone if soil_qty_rev2==.
+tab soil_qty_rev2, missing
+
+replace soil_qty_rev2= 2 if soil_qty_rev2==1.5
+tab soil_qty_rev2, missing
+
+la define soil 1 "Good" 2 "fair" 3 "poor"
+
+*la value soil soil_qty_rev2
+
+collapse (mean) soil_qty_rev2 , by (hhid)
+la var soil_qty_rev2 "1=Good 2= fair 3=Bad "
+save "${Nigeria_GHS_W5_created_data}\soil_quality_2023.dta", replace
 
 
 
 
 
 
+
+
+*******************************
+*Soil Quality Plot
+*******************************
+*starting with planting
+//ALT IMPORTANT NOTE: As of w5, the implied area conversions for farmer estimated units (including hectares) are markedly different from previous waves. I recommend excluding plots that do not have GPS measured areas from any area-based productivity estimates.
+use "${Nigeria_GHS_W5_raw_data}/sect11a1_plantingw5.dta", clear
+*merging in planting section to get cultivated status
+merge 1:1 hhid plotid using "${Nigeria_GHS_W5_raw_data}/sect11b1_plantingw5.dta", nogen
+*merging in harvest section to get areas for new plots
+merge 1:1 hhid plotid using "${Nigeria_GHS_W5_raw_data}/secta1_harvestw5.dta", gen(plot_merge)
+ren s11aq3_number area_size
+ren s11aq3_unit area_unit
+ren sa1q1c area_size2 //GPS measurement, no units in file
+//ren sa1q9b area_unit2 //Not in file
+ren s11mq3 area_meas_sqm
+//ren sa1q9c area_meas_sqm2
+gen cultivate = sa1q1a ==1 
+
+gen field_size= area_size if area_unit==6
+replace field_size = area_size*0.0667 if area_unit==4									//reported in plots
+replace field_size = area_size*0.404686 if area_unit==5		    						//reported in acres
+replace field_size = area_size*0.0001 if area_unit==7									//reported in square meters
+replace field_size = area_size*0.09290304 if area_unit==8
+replace field_size = area_size*0.04645152 if area_unit==9
+replace field_size = area_size*0.721159848 if area_unit==10
+
+replace field_size = area_size*0.00012 if area_unit==1 & zone==1						//reported in heaps
+replace field_size = area_size*0.00016 if area_unit==1 & zone==2
+replace field_size = area_size*0.00011 if area_unit==1 & zone==3
+replace field_size = area_size*0.00019 if area_unit==1 & zone==4
+replace field_size = area_size*0.00021 if area_unit==1 & zone==5
+replace field_size = area_size*0.00012 if area_unit==1 & zone==6
+
+replace field_size = area_size*0.0027 if area_unit==2 & zone==1							//reported in ridges
+replace field_size = area_size*0.004 if area_unit==2 & zone==2
+replace field_size = area_size*0.00494 if area_unit==2 & zone==3
+replace field_size = area_size*0.0023 if area_unit==2 & zone==4
+replace field_size = area_size*0.0023 if area_unit==2 & zone==5
+replace field_size = area_size*0.00001 if area_unit==2 & zone==6
+
+replace field_size = area_size*0.00006 if area_unit==3 & zone==1						//reported in stands
+replace field_size = area_size*0.00016 if area_unit==3 & zone==2
+replace field_size = area_size*0.00004 if area_unit==3 & zone==3
+replace field_size = area_size*0.00004 if area_unit==3 & zone==4
+replace field_size = area_size*0.00013 if area_unit==3 & zone==5
+replace field_size = area_size*0.00041 if area_unit==3 & zone==6
+
+/*ALT 02.23.23*/ gen area_est = field_size
+*replacing farmer reported with GPS if available
+replace field_size =  area_meas_sqm*0.0001 if area_meas_sqm!=.
+        				
+gen gps_meas = (area_meas_sqm!=. & area_meas_sqm !=0)
+la var gps_meas "Plot was measured with GPS, 1=Yes"
+keep zone state lga sector ea hhid plotid field_size
+
+merge 1:1 hhid plotid using "${Nigeria_GHS_W5_raw_data}\sect11b1_plantingw5.dta"
+*merge m:1 hhid using "${Nigeria_GHS_W4_created_data}/ag_rainy_18.dta", gen(filter)
+
+*keep if ag_rainy_18==1
+
+ren s11b1q62 soil_quality
+tab soil_quality , missing
+order field_size soil_quality hhid 
+sort hhid
+
+tab field_size, missing
+tab soil_quality if field_size!=., missing
+
+gen good = (soil_quality==1)
+gen fair = (soil_quality==2)
+gen poor = (soil_quality==3)
+
+
+gen irrigation = (s11b1q56==1)
+gen tractors = (s11b1q69==1)
+gen flat_slope = (s11b1q63==1)
+gen steep_slope = (s11b1q63==4)
+gen slope_slope = (s11b1q63==2 | s11b1q63==3 )
+
+ren plotid plot_id
+collapse (max) good fair poor irrigation tractors flat_slope steep_slope slope_slope , by (hhid plot_id)
+tab good, missing
+tab fair, missing
+tab poor, missing
+save "${Nigeria_GHS_W5_created_data}\soil_quality_2023_plot.dta", replace
 
 
 ********************************************************************************
@@ -1383,8 +1586,66 @@ replace tpricefert_cens_mrk = medianfert_pr_zone if tpricefert_cens_mrk ==. & nu
 
 
 
+********Distance to institute of purchased fertilizer
+gen distance = s11c3q8 if inputid >=2 & inputid <=4
+tab distance
+replace distance = . if distance== 0
+tab distance
 
-collapse (sum) total_qty n_kg p_kg (max) tpricefert_cens_mrk, by( hhid)
+egen medianfert_dist_ea = median(distance), by (ea)
+egen medianfert_dist_lga = median(distance), by (lga)
+egen medianfert_dist_state = median(distance), by (state)
+egen medianfert_dist_zone = median(distance), by (zone)
+egen medianfert_dist_sector = median(distance), by (sector)
+
+
+egen num_fert_dist_ea = count(distance), by (ea)
+egen num_fert_dist_lga = count(distance), by (lga)
+egen num_fert_dist_state = count(distance), by (state)
+egen num_fert_dist_zone = count(distance), by (zone)
+egen num_fert_dist_sector = count(distance), by (sector)
+
+
+tab medianfert_dist_ea
+tab medianfert_dist_lga
+tab medianfert_dist_state
+tab medianfert_dist_zone
+
+
+
+tab num_fert_dist_ea
+tab num_fert_dist_lga
+tab num_fert_dist_state
+tab num_fert_dist_zone
+
+gen mrk_dist = distance
+
+replace mrk_dist = medianfert_dist_ea if mrk_dist ==. & num_fert_dist_ea >= 20
+
+tab mrk_dist,missing
+
+
+replace mrk_dist = medianfert_dist_lga if mrk_dist ==. & num_fert_dist_lga >= 20
+
+tab mrk_dist,missing
+
+
+
+replace mrk_dist = medianfert_dist_state if mrk_dist ==. & num_fert_dist_state >= 20
+
+tab mrk_dist,missing
+
+
+replace mrk_dist = medianfert_dist_zone if mrk_dist ==. & num_fert_dist_zone >= 20
+
+tab mrk_dist,missing
+replace mrk_dist = medianfert_dist_sector if mrk_dist ==. & num_fert_dist_sector >= 20
+
+tab mrk_dist,missing
+
+
+
+collapse (sum) total_qty n_kg p_kg (max) mrk_dist tpricefert_cens_mrk, by( hhid)
  
 replace  total_qty = 3000 if total_qty >= 3000
 replace n_kg = 621 if n_kg >=621
@@ -1393,6 +1654,24 @@ tab total_qty
 gen real_tpricefert_cens_mrk = tpricefert_cens_mrk /1
 
 sum tpricefert_cens_mrk real_tpricefert_cens_mrk, detail
+
+
+
+************winzonrizing fertilizer distance
+foreach v of varlist  mrk_dist  {
+	_pctile `v'  , p(1 99) //[aw=weight]
+	gen `v'_w=`v'
+	*replace  `v'_w = r(r1) if  `v'_w < r(r1) &  `v'_w!=.
+	replace  `v'_w = r(r2) if  `v'_w > r(r2) &  `v'_w!=.
+	local l`v' : var lab `v'
+	lab var  `v'_w  "`l`v'' - Winzorized top & bottom 1%"
+}
+
+tab mrk_dist
+tab mrk_dist_w, missing
+sum mrk_dist mrk_dist_w, detail
+la var mrk_dist_w "distance to the nearest market in km"
+
 
 save "${Nigeria_GHS_W5_created_data}/fert_units.dta", replace
 
@@ -1429,7 +1708,19 @@ gen nitrogen_urea = qtyurea*0.46
 
 egen n_kg_plot = rowtotal(nitrogen_npk nitrogen_urea)
 
-collapse (sum) inorg_fert_kg n_kg_plot, by( hhid plot_id)
+
+
+
+
+
+
+gen  herbicide = (s11c2q1 ==1)
+gen  pesticide = (s11c2q3 ==1)
+gen  org_fert = (s11c2q11 ==1)
+gen  animal_tract = (s11c2q14 ==1)
+gen  mechanization = (s11c2q20 ==1)
+
+collapse (sum) inorg_fert_kg n_kg_plot (max) herbicide pesticide org_fert animal_tract mechanization, by( hhid plot_id)
 
 save "${Nigeria_GHS_W5_created_data}/fert_used.dta", replace
 
@@ -1618,6 +1909,205 @@ save "${Nigeria_GHS_W5_created_data}\household_asset_2023.dta", replace
 
 
 
+*********************************
+*Demographics 
+*********************************
+
+
+
+use "${Nigeria_GHS_W5_raw_data}\sect1_plantingw5.dta",clear 
+
+
+merge 1:1 hhid indiv using "${Nigeria_GHS_W5_raw_data}\sect2_harvestw5.dta" //, gen(household)
+
+*merge m:1 zone state lga sector ea using "${Nigeria_GHS_W4_created_data}\market_distance.dta", keepusing (median_lga median_state median_zone mrk_dist1)
+
+*merge m:1 hhid using "${Nigeria_GHS_W4_created_data}/ag_rainy_18.dta", gen(filter)
+
+*keep if ag_rainy_18==1
+**************
+*market distance
+*************
+
+
+
+
+
+
+*s1q2 sex
+*s1q3 relationship with hhead (1= head)
+*s1q6 age (in years)
+sort hhid indiv 
+ 
+gen num_mem  = 1
+
+
+******** female head****
+
+gen femhead  = 0
+replace femhead = 1 if s1q2== 2 & s1q3==1
+tab femhead,missing
+
+********Age of HHead***********
+ren s1q6 hh_age
+gen hh_headage  = hh_age if s1q3==1
+
+tab hh_headage
+
+replace hh_headage = 100 if hh_headage > 100 & hh_headage < .
+tab hh_headage
+tab hh_headage, missing
+
+
+************generating the median age**************
+
+egen medianhh_pr_ea = median(hh_headage), by (ea)
+
+egen medianhh_pr_lga = median(hh_headage), by (lga)
+
+egen num_hh_pr_ea = count(hh_headage), by (ea)
+
+egen num_hh_pr_lga = count(hh_headage), by (lga)
+
+egen medianhh_pr_state = median(hh_headage), by (state)
+egen num_hh_pr_state = count(hh_headage), by (state)
+
+egen medianhh_pr_zone = median(hh_headage), by (zone)
+egen num_hh_pr_zone = count(hh_headage), by (zone)
+
+
+tab medianhh_pr_ea
+tab medianhh_pr_lga
+tab medianhh_pr_state
+tab medianhh_pr_zone
+
+
+
+tab num_hh_pr_ea
+tab num_hh_pr_lga
+tab num_hh_pr_state
+tab num_hh_pr_zone
+
+
+
+replace hh_headage = medianhh_pr_ea if hh_headage ==. & num_hh_pr_ea >= 30
+
+tab hh_headage,missing
+
+
+replace hh_headage = medianhh_pr_lga if hh_headage ==. & num_hh_pr_lga >= 30
+
+tab hh_headage,missing
+
+
+
+replace hh_headage = medianhh_pr_state if hh_headage ==. & num_hh_pr_state >= 30
+
+tab hh_headage,missing
+
+
+replace hh_headage = medianhh_pr_zone if hh_headage ==. & num_hh_pr_zone >= 30
+
+tab hh_headage,missing
+
+sum hh_headage, detail
+
+
+
+********************Education****************************************************
+*s2aq6 attend school
+*s2aq9 highest level of edu completed
+*s1q3 relationship with hhead (1= head)
+
+ren  s2q6 attend_sch 
+tab attend_sch
+replace attend_sch = 0 if attend_sch ==2
+tab attend_sch, nolabel
+*tab s1q4 if s2q7==.
+
+replace s2q9= 0 if attend_sch==0
+tab s2q9
+tab s1q3 if _merge==1
+
+tab s2q9 if s1q3==1
+replace s2q9 = 16 if s2q9==. &  s1q3==1
+
+*** Education Dummy Variable*****
+
+ label list s2q9
+
+gen pry_edu  = 1 if s2q9 >= 1 & s2q9 < 16 & s1q3==1
+gen finish_pry = 1 if s2q9 >= 16 & s2q9 < 26 & s1q3==1
+gen finish_sec  = 1 if s2q9 >= 26 & s2q9 & s1q3==1
+replace finish_sec  =0 if s2q9==51 | s2q9==52 & s1q3==1
+
+replace pry_edu =0 if pry_edu==. & s1q3==1
+replace finish_pry  =0 if finish_pry==. & s1q3==1
+replace finish_sec =0 if finish_sec==. & s1q3==1
+tab pry_edu if s1q3==1 , missing
+tab finish_pry if s1q3==1 , missing 
+tab finish_sec if s1q3==1 , missing
+
+collapse (sum) num_mem (max)  hh_headage femhead attend_sch  pry_edu finish_pry finish_sec, by (hhid)
+
+
+
+
+keep hhid  num_mem femhead hh_headage attend_sch pry_edu finish_pry finish_sec
+
+tab attend_sch, missing
+egen mid_attend= median(attend_sch)
+replace attend_sch = mid_attend if attend_sch==.
+
+tab pry_edu, missing
+tab finish_pry, missing
+tab finish_sec, missing
+
+egen mid_pry_edu= median(pry_edu)
+egen mid_finish_pry= median(finish_pry)
+egen mid_finish_sec= median(finish_sec)
+
+replace pry_edu = mid_pry_edu if pry_edu==.
+replace finish_pry = mid_finish_pry if finish_pry==.
+replace finish_sec = mid_finish_sec if finish_sec==.
+
+
+
+la var num_mem "household size"
+
+la var femhead  "=1 if head is female"
+la var hh_headage "age of household head in years"
+la var attend_sch"=1 if respondent attended school"
+la var pry_edu  "=1 if household head attended pry school"
+la var finish_pry "=1 if household head finished pry school"
+la var finish_sec "=1 if household head finished sec school"
+save "${Nigeria_GHS_W5_created_data}\demographics_2023.dta", replace
+
+*/
+
+
+********************************* 
+*Labor Age 
+*********************************
+use "${Nigeria_GHS_W5_raw_data}\sect1_plantingw5.dta",clear 
+*merge m:1 hhid using "${Nigeria_GHS_W4_created_data}/ag_rainy_18.dta", gen(filter)
+
+*keep if ag_rainy_18==1
+ren s1q6 hh_age
+
+gen worker = 1
+replace worker = 0 if hh_age < 15 | hh_age > 65
+
+tab worker,missing
+sort hhid
+collapse (sum) worker, by (hhid)
+la var worker "number of members age 15 and older and less than 65"
+sort hhid
+
+save "${Nigeria_GHS_W5_created_data}\laborage_2023.dta", replace
+
+
+
 
 
 
@@ -1662,7 +2152,9 @@ merge 1:1 hhid using "C:\Users\obine\Music\Documents\food\evans/ag_rainy_18.dta"
 merge 1:1 hhid using "C:\Users\obine\Music\Documents\food\evans/dieatary_diversity.dta", gen(diet)
 merge 1:1 hhid using "C:\Users\obine\Music\Documents\food\evans/Nigeria_GHS_W4_consumption.dta", gen(exp)
 merge 1:1 hhid using "C:\Users\obine\Music\Documents\food\evans/Nigeria_GHS_W4_hhsize.dta", gen(hh)
-
+merge 1:1 hhid using "C:\Users\obine\Music\Documents\food\evans/soil_quality_2018.dta", gen(soil)
+merge 1:1 hhid using "C:\Users\obine\Music\Documents\food\evans/demographics_2018.dta", gen(house)
+merge 1:1 hhid using "C:\Users\obine\Music\Documents\food\evans/laborage_2018.dta", gen(work)
 
 
 keep if ag_rainy_18==1
@@ -1672,17 +2164,19 @@ keep if ag_rainy_18==1
 gen year = 2018
 tabstat ha_planted field_size quant_harv_kg value_harvest maize_price_mr real_maize_price_mr total_qty n_kg  tpricefert_cens_mrk real_tpricefert_cens_mrk  hhasset_value_w real_hhvalue [w=weight], statistics( mean median sd min max ) columns(statistics)
 count
-misstable summarize ha_planted field_size quant_harv_kg value_harvest maize_price_mr real_maize_price_mr total_qty n_kg  tpricefert_cens_mrk real_tpricefert_cens_mrk  hhasset_value_w real_hhvalue totcons_pc peraeq_cons total_cons
+misstable summarize ha_planted field_size quant_harv_kg value_harvest maize_price_mr real_maize_price_mr total_qty n_kg  tpricefert_cens_mrk real_tpricefert_cens_mrk  hhasset_value_w real_hhvalue totcons_pc peraeq_cons total_cons mrk_dist_w num_mem hh_headage femhead attend_sch worker zone state lga ea
+
 
 
 replace total_qty = 0 if total_qty==.
 replace n_kg = 0 if n_kg ==.
 
+/*
 replace ha_planted = 0 if ha_planted==.
 replace field_size = 0 if field_size ==.
 replace value_harvest = 0 if value_harvest==.
 replace quant_harv_kg = 0 if quant_harv_kg ==.
-
+*/
 egen medianfert_pr = median(real_tpricefert_cens_mrk)
 egen medianfert_ = median(tpricefert_cens_mrk)
 replace real_tpricefert_cens_mrk = medianfert_pr if real_tpricefert_cens_mrk ==. 
@@ -1699,14 +2193,27 @@ replace maize_price_mr = medianmaize_ if maize_price_mr ==.
 
 
 
-misstable summarize ha_planted field_size quant_harv_kg value_harvest maize_price_mr real_maize_price_mr total_qty n_kg  tpricefert_cens_mrk real_tpricefert_cens_mrk  hhasset_value_w real_hhvalue totcons_pc peraeq_cons total_cons
+egen medianfert_dist_ea = median(mrk_dist_w), by (ea)
+egen medianfert_dist_lga = median(mrk_dist_w), by (lga)
+egen medianfert_dist_state = median(mrk_dist_w), by (state)
+egen medianfert_dist_zone = median(mrk_dist_w), by (zone)
+
+
+replace mrk_dist_w = medianfert_dist_ea if mrk_dist_w ==. 
+replace mrk_dist_w = medianfert_dist_lga if mrk_dist_w ==. 
+replace mrk_dist_w = medianfert_dist_state if mrk_dist_w ==.
+
+replace mrk_dist_w = medianfert_dist_zone if mrk_dist_w ==. 
+
+misstable summarize ha_planted field_size quant_harv_kg value_harvest maize_price_mr real_maize_price_mr total_qty n_kg  tpricefert_cens_mrk real_tpricefert_cens_mrk  hhasset_value_w real_hhvalue totcons_pc peraeq_cons total_cons number_foodgroup mrk_dist_w num_mem hh_headage femhead attend_sch worker 
+
 
 
 save "C:\Users\obine\Music\Documents\food\evans/checking.dta", replace
 
 
 
-
+global Nigeria_GHS_W5_created_data  "C:\Users\obine\Music\Documents\food_secure\evans"
 
 use "${Nigeria_GHS_W5_created_data}/Nigeria_GHS_W5_all_plots.dta",clear
 
@@ -1730,7 +2237,9 @@ merge 1:1 hhid using "${Nigeria_GHS_W5_created_data}/ag_rainy_18.dta", gen(filte
 merge 1:1 hhid using "${Nigeria_GHS_W5_created_data}/dieatary_diversity.dta", gen(diet)
 merge 1:1 hhid using "${Nigeria_GHS_W5_created_data}/Nigeria_GHS_W5_consumption.dta", gen(exp)
 merge 1:1 hhid using "${Nigeria_GHS_W5_created_data}/Nigeria_GHS_W5_hhsize.dta", gen(hh)
-
+merge 1:1 hhid using "${Nigeria_GHS_W5_created_data}/soil_quality_2023.dta", gen(soil)
+merge 1:1 hhid using "${Nigeria_GHS_W5_created_data}/demographics_2023.dta", gen(house)
+merge 1:1 hhid using "${Nigeria_GHS_W5_created_data}/laborage_2023.dta", gen(work)
 
 
 
@@ -1738,19 +2247,20 @@ keep if ag_rainy_23==1
 gen year =2023
 ***********************Dealing with outliers*************************
 
-tabstat ha_planted field_size quant_harv_kg value_harvest maize_price_mr real_maize_price_mr total_qty n_kg  tpricefert_cens_mrk real_tpricefert_cens_mrk  hhasset_value_w real_hhvalue [w=weight], statistics( mean median sd min max ) columns(statistics)
+tabstat ha_planted field_size quant_harv_kg value_harvest maize_price_mr real_maize_price_mr total_qty n_kg  tpricefert_cens_mrk real_tpricefert_cens_mrk  hhasset_value_w real_hhvalue number_foodgroup soil_qty_rev2 [w=weight], statistics( mean median sd min max ) columns(statistics)
 count
-misstable summarize ha_planted field_size quant_harv_kg value_harvest maize_price_mr real_maize_price_mr total_qty n_kg  tpricefert_cens_mrk real_tpricefert_cens_mrk  hhasset_value_w real_hhvalue totcons_pc peraeq_cons total_cons hh_members
+misstable summarize ha_planted field_size quant_harv_kg value_harvest maize_price_mr real_maize_price_mr total_qty n_kg  tpricefert_cens_mrk real_tpricefert_cens_mrk  hhasset_value_w real_hhvalue totcons_pc peraeq_cons total_cons hh_members number_foodgroup soil_qty_rev2 mrk_dist_w num_mem hh_headage femhead attend_sch worker zone state lga ea 
 
 
 replace total_qty = 0 if total_qty==.
 replace n_kg = 0 if n_kg ==.
 
+/*
 replace ha_planted = 0 if ha_planted==.
 replace field_size = 0 if field_size ==.
 replace value_harvest = 0 if value_harvest==.
 replace quant_harv_kg = 0 if quant_harv_kg ==.
-
+*/
 egen medianfert_pr = median(real_tpricefert_cens_mrk)
 egen medianfert_ = median(tpricefert_cens_mrk)
 
@@ -1766,7 +2276,20 @@ replace real_maize_price_mr = medianmaize_pr if real_maize_price_mr ==.
 replace maize_price_mr = medianmaize_ if maize_price_mr ==. 
 
 
-misstable summarize ha_planted field_size quant_harv_kg value_harvest maize_price_mr real_maize_price_mr total_qty n_kg  tpricefert_cens_mrk real_tpricefert_cens_mrk  hhasset_value_w real_hhvalue totcons_pc peraeq_cons total_cons hh_members
+egen medianfert_dist_ea = median(mrk_dist_w), by (ea)
+egen medianfert_dist_lga = median(mrk_dist_w), by (lga)
+egen medianfert_dist_state = median(mrk_dist_w), by (state)
+egen medianfert_dist_zone = median(mrk_dist_w), by (zone)
+
+
+replace mrk_dist_w = medianfert_dist_ea if mrk_dist_w ==. 
+replace mrk_dist_w = medianfert_dist_lga if mrk_dist_w ==. 
+replace mrk_dist_w = medianfert_dist_state if mrk_dist_w ==.
+
+replace mrk_dist_w = medianfert_dist_zone if mrk_dist_w ==. 
+
+
+misstable summarize ha_planted field_size quant_harv_kg value_harvest maize_price_mr real_maize_price_mr total_qty n_kg  tpricefert_cens_mrk real_tpricefert_cens_mrk  hhasset_value_w real_hhvalue totcons_pc peraeq_cons total_cons hh_members number_foodgroup soil_qty_rev2 mrk_dist_w num_mem hh_headage femhead attend_sch worker
 
 append using "C:\Users\obine\Music\Documents\food\evans/checking.dta"
 
@@ -1794,6 +2317,8 @@ order year
 
 sort hhid  year
 
+misstable summarize ha_planted field_size quant_harv_kg value_harvest maize_price_mr real_maize_price_mr total_qty n_kg  tpricefert_cens_mrk real_tpricefert_cens_mrk  hhasset_value_w real_hhvalue totcons_pc peraeq_cons total_cons hh_members number_foodgroup soil_qty_rev2 mrk_dist_w num_mem hh_headage femhead attend_sch worker zone state lga ea
+
 
 *tab if ha_planted == 0 | ha_planted == .
 drop if ha_planted == 0 | ha_planted == .
@@ -1812,11 +2337,22 @@ foreach v of varlist  productivity  {
 }
 /////real variables
 
-misstable summarize ha_planted field_size quant_harv_kg yield_plot value_harvest maize_price_mr real_maize_price_mr total_qty n_kg n_rate tpricefert_cens_mrk real_tpricefert_cens_mrk  hhasset_value_w real_hhvalue productivity productivity_w household_diet_cut_off1 household_diet_cut_off2 totcons_pc peraeq_cons total_cons hh_members
+gen input_ratio =  real_tpricefert_cens_mrk/real_maize_price_mr
+gen output_ratio =  real_maize_price_mr/ real_tpricefert_cens_mrk
+gen good = (soil_qty_rev2 ==1)
+gen fair = (soil_qty_rev2==2)
+gen poor = (soil_qty_rev2==3)
+gen good_soil_plant = ha_planted if ha_planted !=. & good==1
+gen fair_soil_plant = ha_planted if ha_planted !=. & fair==1
+gen poor_soil_plant = ha_planted if ha_planted !=. & poor==1
+
+
+
+misstable summarize ha_planted field_size quant_harv_kg yield_plot value_harvest maize_price_mr real_maize_price_mr total_qty n_kg n_rate tpricefert_cens_mrk real_tpricefert_cens_mrk  hhasset_value_w real_hhvalue productivity productivity_w household_diet_cut_off1 household_diet_cut_off2 totcons_pc peraeq_cons total_cons hh_members number_foodgroup input_ratio output_ratio soil_qty_rev2 good fair poor mrk_dist_w num_mem hh_headage femhead attend_sch worker
 preserve
 
 keep if year ==2018
-tabstat ha_planted field_size quant_harv_kg yield_plot value_harvest maize_price_mr real_maize_price_mr total_qty n_kg n_rate tpricefert_cens_mrk real_tpricefert_cens_mrk  hhasset_value_w real_hhvalue productivity productivity_w household_diet_cut_off1 household_diet_cut_off2 totcons_pc peraeq_cons total_cons hh_members [w=weight], statistics( mean median sd min max ) columns(statistics)
+tabstat ha_planted field_size quant_harv_kg yield_plot value_harvest maize_price_mr real_maize_price_mr total_qty n_kg n_rate tpricefert_cens_mrk real_tpricefert_cens_mrk  hhasset_value_w real_hhvalue productivity productivity_w household_diet_cut_off1 household_diet_cut_off2 totcons_pc peraeq_cons total_cons hh_members number_foodgroup input_ratio output_ratio soil_qty_rev2 good fair poor good_soil_plant fair_soil_plant poor_soil_plant mrk_dist_w num_mem hh_headage femhead attend_sch worker [w=weight], statistics( mean median sd min max ) columns(statistics)
 count
 restore
 
@@ -1824,7 +2360,7 @@ restore
 preserve
 
 keep if year ==2023
-tabstat ha_planted field_size quant_harv_kg yield_plot value_harvest maize_price_mr real_maize_price_mr total_qty n_kg n_rate tpricefert_cens_mrk real_tpricefert_cens_mrk  hhasset_value_w real_hhvalue productivity productivity_w household_diet_cut_off1 household_diet_cut_off2 totcons_pc peraeq_cons total_cons hh_members [w=weight], statistics( mean median sd min max ) columns(statistics)
+tabstat ha_planted field_size quant_harv_kg yield_plot value_harvest maize_price_mr real_maize_price_mr total_qty n_kg n_rate tpricefert_cens_mrk real_tpricefert_cens_mrk  hhasset_value_w real_hhvalue productivity productivity_w household_diet_cut_off1 household_diet_cut_off2 totcons_pc peraeq_cons total_cons hh_members number_foodgroup input_ratio output_ratio soil_qty_rev2 good fair poor good_soil_plant fair_soil_plant poor_soil_plant mrk_dist_w num_mem hh_headage femhead attend_sch worker [w=weight], statistics( mean median sd min max ) columns(statistics)
 count
 restore
 
@@ -1837,31 +2373,400 @@ bysort hhid : egen sum_4waves_com_fer_bin = sum(commercial_dummy)
 
 
 **********************************
+ttest household_diet_cut_off2, by(year) unequal
+ttest number_foodgroup, by(year) unequal
+ttest totcons_pc, by(year) unequal
+ttest peraeq_cons, by(year) unequal
+ttest ha_planted, by(year) unequal
+ttest field_size, by(year) unequal
+ttest quant_harv_kg, by(year) unequal
+ttest yield_plot, by(year) unequal
+ttest value_harvest, by(year) unequal
+ttest productivity_w, by(year) unequal
+ttest maize_price_mr, by(year) unequal
+ttest real_maize_price_mr, by(year) unequal
+ttest input_ratio, by(year) unequal
+ttest total_qty, by(year) unequal
+ttest n_kg, by(year) unequal
+ttest n_rate, by(year) unequal
+ttest tpricefert_cens_mrk, by(year) unequal
+ttest real_tpricefert_cens_mrk, by(year) unequal
+ttest good, by(year) unequal
+ttest fair, by(year) unequal
+ttest poor, by(year) unequal
+ttest good_soil_plant, by(year) unequal
+ttest fair_soil_plant, by(year) unequal
+ttest poor_soil_plant, by(year) unequal
+ttest hh_members, by(year) unequal
+ttest hhasset_value_w, by(year) unequal
 
-* Step 1: Keep only relevant years
-keep if year == 2018 | year == 2023
-
-* Step 2: Reshape wide by household
-reshape wide quant_harv_kg yield_plot value_harvest, i(hhid) j(year)
-
-* Step 3: Paired t-tests for each variable
-ttest quant_harv_kg2023 == quant_harv_kg2018
-ttest yield_plot2023 == yield_plot2018
-ttest value_harvest2023 == value_harvest2018
-ttest inorg_fert_kg2023 == inorg_fert_kg2018
-ttest n_kg2023 == n_kg2018
 
 
+//yield_plot productivity_w household_diet_cut_off2 peraeq_cons number_foodgroup
+ 
 
 
+* Generate interaction term
+gen year2023 = (real_tpricefert_cens_mrk !=. & year == 2023)
+gen price2023 = real_tpricefert_cens_mrk * year2023
+gen mrk_dist_w23 = mrk_dist_w *year2023
+gen real_hhvalue_23 = real_hhvalue * year2023
+gen fert_mrk_23 = mrk_dist_w *real_tpricefert_cens_mrk
+gen t23 = real_tpricefert_cens_mrk * mrk_dist_w * year2023
 
 
-
+//////////////////////////////////////Regression//////////////////////////////
+save "C:\Users\obine\Music\Documents\food_secure\dofile\maize2_farm_dofile.dta", replace
 
 
 
 
-//////////////////////////////////////Plot Level Merging//////////////////////////////////////////////////////
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+************************************************************************************************************************
+*Model Specification Using Fertilizer Prices
+************************************************************************************************************************
+use "C:\Users\obine\Music\Documents\food_secure\dofile\maize_farm_dofile.dta", clear
+*-----------------------------
+* DID regression without controls
+*-----------------------------
+eststo clear
+reg peraeq_cons price2023 real_tpricefert_cens_mrk year2023  , cluster(hhid)
+eststo model1
+*no controls
+reg peraeq_cons price2023 real_tpricefert_cens_mrk year2023   mrk_dist_w real_maize_price_mr good fair  total_qty real_hhvalue field_size num_mem  hh_headage femhead attend_sch worker, cluster(hhid)
+eststo model2
+
+* DID regression with controls + district fixed effects
+reg peraeq_cons price2023 real_tpricefert_cens_mrk year2023   mrk_dist_w real_maize_price_mr good fair  total_qty real_hhvalue field_size num_mem hh_headage femhead attend_sch worker i.zone, cluster(hhid)
+
+areg peraeq_cons price2023 real_tpricefert_cens_mrk year2023  mrk_dist_w real_maize_price_mr good fair total_qty real_hhvalue field_size num_mem  hh_headage femhead attend_sch worker, absorb(zone) cluster(hhid)
+eststo model3
+*-----------------------------
+* Export all results into one DOCX file
+*-----------------------------
+esttab m* using "C:\Users\obine\Music\Documents\Project_25\Table05m.regression.rtf", label replace cells(b(star fmt(%9.2f)) se(par fmt(%9.2f)))
+
+
+
+//////////////////////////////////////Regression//////////////////////////////
+
+
+*-----------------------------
+* DID regression without controls
+*-----------------------------
+eststo clear
+reg household_diet_cut_off2 price2023 real_tpricefert_cens_mrk year2023  , cluster(hhid)
+eststo model1
+*no controls
+reg household_diet_cut_off2 price2023 real_tpricefert_cens_mrk year2023   mrk_dist_w real_maize_price_mr good fair  total_qty real_hhvalue field_size num_mem hh_headage femhead attend_sch worker, cluster(hhid)
+eststo model2
+
+* DID regression with controls + district fixed effects
+reg household_diet_cut_off2 price2023 real_tpricefert_cens_mrk year2023   mrk_dist_w real_maize_price_mr good fair  total_qty real_hhvalue field_size num_mem hh_headage femhead attend_sch worker i.zone, cluster(hhid)
+
+areg household_diet_cut_off2 price2023 real_tpricefert_cens_mrk year2023  mrk_dist_w real_maize_price_mr good fair total_qty real_hhvalue field_size num_mem hh_headage femhead attend_sch worker, absorb(zone) cluster(hhid)
+eststo model3
+*-----------------------------
+* Export all results into one DOCX file
+*-----------------------------
+esttab m* using "C:\Users\obine\Music\Documents\Project_25\Table01m.regression.rtf", label replace cells(b(star fmt(%9.2f)) se(par fmt(%9.2f)))
+
+
+
+//////////////////////////////////////Regression//////////////////////////////
+
+
+*-----------------------------
+* DID regression without controls
+*-----------------------------
+eststo clear
+reg number_foodgroup price2023 real_tpricefert_cens_mrk year2023  , cluster(hhid)
+eststo model1
+*no controls
+reg number_foodgroup price2023 real_tpricefert_cens_mrk year2023   mrk_dist_w real_maize_price_mr good fair  total_qty real_hhvalue field_size num_mem hh_headage femhead attend_sch worker, cluster(hhid)
+eststo model2
+
+* DID regression with controls + district fixed effects
+reg number_foodgroup price2023 real_tpricefert_cens_mrk year2023   mrk_dist_w real_maize_price_mr good fair  total_qty real_hhvalue field_size num_mem hh_headage femhead attend_sch worker i.zone, cluster(hhid)
+
+areg number_foodgroup price2023 real_tpricefert_cens_mrk year2023  mrk_dist_w real_maize_price_mr good fair total_qty real_hhvalue field_size num_mem hh_headage femhead attend_sch worker, absorb(zone) cluster(hhid)
+eststo model3
+*-----------------------------
+* Export all results into one DOCX file
+*-----------------------------
+esttab m* using "C:\Users\obine\Music\Documents\Project_25\Table02m.regression.rtf", label replace cells(b(star fmt(%9.2f)) se(par fmt(%9.2f)))
+
+
+
+//////////////////////////////////////Regression//////////////////////////////
+
+
+*-----------------------------
+* DID regression without controls
+*-----------------------------
+eststo clear
+reg yield_plot price2023 real_tpricefert_cens_mrk year2023  , cluster(hhid)
+eststo model1
+*no controls
+reg yield_plot price2023 real_tpricefert_cens_mrk year2023   mrk_dist_w real_maize_price_mr good fair  total_qty real_hhvalue field_size num_mem hh_headage femhead attend_sch worker, cluster(hhid)
+eststo model2
+
+* DID regression with controls + district fixed effects
+reg yield_plot price2023 real_tpricefert_cens_mrk year2023   mrk_dist_w real_maize_price_mr good fair  total_qty real_hhvalue field_size num_mem hh_headage femhead attend_sch worker i.zone, cluster(hhid)
+
+areg yield_plot price2023 real_tpricefert_cens_mrk year2023  mrk_dist_w real_maize_price_mr good fair total_qty real_hhvalue field_size num_mem hh_headage femhead attend_sch worker, absorb(zone) cluster(hhid)
+eststo model3
+*-----------------------------
+* Export all results into one DOCX file
+*-----------------------------
+esttab m* using "C:\Users\obine\Music\Documents\Project_25\Table03m.regression.rtf", label replace cells(b(star fmt(%9.2f)) se(par fmt(%9.2f)))
+
+
+
+//////////////////////////////////////Regression//////////////////////////////
+
+
+*-----------------------------
+* DID regression without controls
+*-----------------------------
+eststo clear
+reg productivity_w price2023 real_tpricefert_cens_mrk year2023  , cluster(hhid)
+eststo model1
+*no controls
+reg productivity_w price2023 real_tpricefert_cens_mrk year2023   mrk_dist_w real_maize_price_mr good fair  total_qty real_hhvalue field_size num_mem hh_headage femhead attend_sch worker, cluster(hhid)
+eststo model2
+
+* DID regression with controls + district fixed effects
+reg productivity_w price2023 real_tpricefert_cens_mrk year2023   mrk_dist_w real_maize_price_mr good fair  total_qty real_hhvalue field_size num_mem hh_headage femhead attend_sch worker i.zone, cluster(hhid)
+
+areg productivity_w price2023 real_tpricefert_cens_mrk year2023  mrk_dist_w real_maize_price_mr good fair total_qty real_hhvalue field_size num_mem hh_headage femhead attend_sch worker, absorb(zone) cluster(hhid)
+eststo model3
+*-----------------------------
+* Export all results into one DOCX file
+*-----------------------------
+esttab m* using "C:\Users\obine\Music\Documents\Project_25\Table04m.regression.rtf", label replace cells(b(star fmt(%9.2f)) se(par fmt(%9.2f)))
+
+
+
+************************************************************************************************************************
+
+
+
+
+
+
+
+
+
+
+************************************************************************************************************************
+*Model Specification Using Distance 
+************************************************************************************************************************
+use "C:\Users\obine\Music\Documents\food_secure\dofile\maize_farm_dofile.dta", clear
+
+*-----------------------------
+* DID regression without controls
+*-----------------------------
+eststo clear
+reg peraeq_cons mrk_dist_w23  year2023  , cluster(hhid)
+eststo model1
+*no controls
+reg peraeq_cons mrk_dist_w23  year2023  mrk_dist_w  real_maize_price_mr good fair  total_qty real_hhvalue field_size num_mem hh_headage femhead attend_sch worker, cluster(hhid)
+eststo model2
+
+* DID regression with controls + district fixed effects
+reg peraeq_cons mrk_dist_w23  year2023 mrk_dist_w   real_maize_price_mr good fair  total_qty real_hhvalue field_size num_mem hh_headage femhead attend_sch worker i.zone, cluster(hhid)
+
+areg peraeq_cons mrk_dist_w23  year2023  mrk_dist_w  real_maize_price_mr good fair  total_qty real_hhvalue field_size num_mem hh_headage femhead attend_sch worker, absorb(zone) cluster(hhid)
+eststo model3
+*-----------------------------
+* Export all results into one DOCX file
+*-----------------------------
+esttab m* using "C:\Users\obine\Music\Documents\Project_25\Table05m.regression.rtf", label replace cells(b(star fmt(%9.2f)) se(par fmt(%9.2f)))
+
+
+
+
+
+
+
+
+*-----------------------------
+* DID regression without controls
+*-----------------------------
+eststo clear
+reg number_foodgroup mrk_dist_w23  year2023  , cluster(hhid)
+eststo model1
+*no controls
+reg number_foodgroup mrk_dist_w23  year2023  mrk_dist_w  real_maize_price_mr good fair  total_qty real_hhvalue field_size num_mem hh_headage femhead attend_sch worker, cluster(hhid)
+eststo model2
+
+* DID regression with controls + district fixed effects
+reg number_foodgroup mrk_dist_w23  year2023 mrk_dist_w   real_maize_price_mr good fair  total_qty real_hhvalue field_size num_mem hh_headage femhead attend_sch worker i.zone, cluster(hhid)
+
+areg number_foodgroup mrk_dist_w23  year2023  mrk_dist_w  real_maize_price_mr good fair  total_qty real_hhvalue field_size num_mem hh_headage femhead attend_sch worker, absorb(zone) cluster(hhid)
+eststo model3
+*-----------------------------
+* Export all results into one DOCX file
+*-----------------------------
+esttab m* using "C:\Users\obine\Music\Documents\Project_25\Table04m.regression.rtf", label replace cells(b(star fmt(%9.2f)) se(par fmt(%9.2f)))
+
+*********************************************************************************************************************************************************
+
+
+
+
+
+
+
+************************************************************************************************************************
+*Model Specification Using hhasset_value_w
+************************************************************************************************************************
+
+use "C:\Users\obine\Music\Documents\food_secure\dofile\maize_farm_dofile.dta", clear
+
+*-----------------------------
+* DID regression without controls
+*-----------------------------
+eststo clear
+reg peraeq_cons real_hhvalue_23  year2023  , cluster(hhid)
+eststo model1
+*no controls
+reg peraeq_cons real_hhvalue_23  year2023  real_hhvalue  mrk_dist_w  real_maize_price_mr good fair  total_qty  field_size num_mem hh_headage femhead attend_sch worker, cluster(hhid)
+eststo model2
+
+* DID regression with controls + district fixed effects
+reg peraeq_cons real_hhvalue_23  year2023 real_hhvalue mrk_dist_w   real_maize_price_mr good fair  total_qty  field_size num_mem hh_headage femhead attend_sch worker i.zone, cluster(hhid)
+
+areg peraeq_cons real_hhvalue_23  year2023 real_hhvalue mrk_dist_w  real_maize_price_mr good fair  total_qty  field_size num_mem hh_headage femhead attend_sch worker, absorb(zone) cluster(hhid)
+eststo model3
+*-----------------------------
+* Export all results into one DOCX file
+*-----------------------------
+esttab m* using "C:\Users\obine\Music\Documents\Project_25\Table05m.regression.rtf", label replace cells(b(star fmt(%9.2f)) se(par fmt(%9.2f)))
+
+
+
+
+
+
+
+
+*-----------------------------
+* DID regression without controls
+*-----------------------------
+eststo clear
+reg number_foodgroup real_hhvalue_23  year2023  , cluster(hhid)
+eststo model1
+*no controls
+reg number_foodgroup  real_hhvalue_23  year2023  real_hhvalue  mrk_dist_w  real_maize_price_mr good fair  total_qty  field_size num_mem hh_headage femhead attend_sch worker, cluster(hhid)
+eststo model2
+
+* DID regression with controls + district fixed effects
+reg number_foodgroup real_hhvalue_23  year2023 real_hhvalue mrk_dist_w   real_maize_price_mr good fair  total_qty  field_size num_mem hh_headage femhead attend_sch worker i.zone, cluster(hhid)
+
+areg number_foodgroup real_hhvalue_23  year2023 real_hhvalue mrk_dist_w  real_maize_price_mr good fair  total_qty  field_size num_mem hh_headage femhead attend_sch worker, absorb(zone) cluster(hhid)
+eststo model3
+*-----------------------------
+* Export all results into one DOCX file
+*-----------------------------
+esttab m* using "C:\Users\obine\Music\Documents\Project_25\Table04m.regression.rtf", label replace cells(b(star fmt(%9.2f)) se(par fmt(%9.2f)))
+
+
+
+
+
+
+
+*-----------------------------
+* DID regression without controls
+*-----------------------------
+eststo clear
+reg yield_plot real_hhvalue_23  year2023  , cluster(hhid)
+eststo model1
+*no controls
+reg yield_plot  real_hhvalue_23  year2023  real_hhvalue  mrk_dist_w  real_maize_price_mr good fair  total_qty  field_size num_mem hh_headage femhead attend_sch worker, cluster(hhid)
+eststo model2
+
+* DID regression with controls + district fixed effects
+reg yield_plot real_hhvalue_23  year2023 real_hhvalue mrk_dist_w   real_maize_price_mr good fair  total_qty  field_size num_mem hh_headage femhead attend_sch worker i.zone, cluster(hhid)
+
+areg yield_plot real_hhvalue_23  year2023 real_hhvalue mrk_dist_w  real_maize_price_mr good fair  total_qty  field_size num_mem hh_headage femhead attend_sch worker, absorb(zone) cluster(hhid)
+eststo model3
+*-----------------------------
+* Export all results into one DOCX file
+*-----------------------------
+esttab m* using "C:\Users\obine\Music\Documents\Project_25\Table03m.regression.rtf", label replace cells(b(star fmt(%9.2f)) se(par fmt(%9.2f)))
+
+
+
+
+
+
+*-----------------------------
+* DID regression without controls
+*-----------------------------
+eststo clear
+reg productivity_w real_hhvalue_23  year2023  , cluster(hhid)
+eststo model1
+*no controls
+reg productivity_w  real_hhvalue_23  year2023  real_hhvalue  mrk_dist_w  real_maize_price_mr good fair  total_qty  field_size num_mem hh_headage femhead attend_sch worker, cluster(hhid)
+eststo model2
+
+* DID regression with controls + district fixed effects
+reg productivity_w real_hhvalue_23  year2023 real_hhvalue mrk_dist_w   real_maize_price_mr good fair  total_qty  field_size num_mem hh_headage femhead attend_sch worker i.zone, cluster(hhid)
+
+areg productivity_w real_hhvalue_23  year2023 real_hhvalue mrk_dist_w  real_maize_price_mr good fair  total_qty  field_size num_mem hh_headage femhead attend_sch worker, absorb(zone) cluster(hhid)
+eststo model3
+*-----------------------------
+* Export all results into one DOCX file
+*-----------------------------
+esttab m* using "C:\Users\obine\Music\Documents\Project_25\Table01m.regression.rtf", label replace cells(b(star fmt(%9.2f)) se(par fmt(%9.2f)))
+
+
+*********************************************************************************************************************************************************
+
+
+
+
+
 
 
 
@@ -1878,7 +2783,7 @@ use  "C:\Users\obine\Music\Documents\food\evans/Nigeria_GHS_W4_all_plots.dta",cl
 sort hhid plot_id
 count
 count if cropcode==1080
-*keep if cropcode==1080
+keep if cropcode==1080
 
 order hhid plot_id cropcode quant_harv_kg value_harvest ha_harvest percent_inputs field_size purestand
 
@@ -1897,6 +2802,11 @@ replace value_harvest=  4695385 if value_harvest>= 4695385
 merge m:1 hhid using "C:\Users\obine\Music\Documents\food\evans/weight.dta", nogen
 merge m:1 hhid using "C:\Users\obine\Music\Documents\food\evans/ag_rainy_18.dta", gen(filter)
 merge 1:1 hhid plot_id using "C:\Users\obine\Music\Documents\food\evans/fert_used.dta", gen(used)
+merge 1:1 hhid plot_id using "C:\Users\obine\Music\Documents\food\evans/soil_quality_2018_plot.dta", gen(soil)
+
+
+
+
 
 keep if ag_rainy_18==1
 ***********************Dealing with outliers*************************
@@ -1905,7 +2815,7 @@ keep if ag_rainy_18==1
 gen year = 2018
 tabstat ha_planted field_size quant_harv_kg value_harvest  inorg_fert_kg n_kg_plot [w=weight], statistics( mean median sd min max ) columns(statistics)
 count
-misstable summarize ha_planted field_size quant_harv_kg value_harvest  inorg_fert_kg n_kg_plot
+misstable summarize ha_planted field_size quant_harv_kg value_harvest  inorg_fert_kg n_kg_plot herbicide pesticide org_fert animal_tract mechanization irrigation tractors flat_slope steep_slope slope_slope
 
 
 replace inorg_fert_kg = 0 if inorg_fert_kg==.
@@ -1918,7 +2828,7 @@ replace quant_harv_kg = 0 if quant_harv_kg ==.
 
 
 
-misstable summarize ha_planted field_size quant_harv_kg value_harvest  inorg_fert_kg n_kg_plot
+misstable summarize ha_planted field_size quant_harv_kg value_harvest  inorg_fert_kg n_kg_plot herbicide pesticide org_fert animal_tract mechanization irrigation tractors flat_slope steep_slope slope_slope
 
 
 save "C:\Users\obine\Music\Documents\food\evans/checking_plot.dta", replace
@@ -1932,7 +2842,7 @@ use "${Nigeria_GHS_W5_created_data}/Nigeria_GHS_W5_all_plots.dta",clear
 sort hhid 
 count
 count if cropcode==1080
-*keep if cropcode==1080
+keep if cropcode==1080
 
 order hhid plot_id cropcode quant_harv_kg value_harvest ha_harvest percent_inputs field_size purestand
 
@@ -1947,6 +2857,8 @@ replace value_harvest=  4695385 if value_harvest>= 4695385
 
 merge m:1 hhid using  "${Nigeria_GHS_W5_created_data}/hhids.dta", nogen
 merge 1:1 hhid plot_id using "${Nigeria_GHS_W5_created_data}/fert_used.dta", gen(fert)
+merge 1:1 hhid plot_id using "${Nigeria_GHS_W5_created_data}/soil_quality_2023_plot.dta", gen(soil)
+
 
 merge m:1 hhid using "${Nigeria_GHS_W5_created_data}/ag_rainy_18.dta", gen(filter)
 
@@ -1954,9 +2866,9 @@ keep if ag_rainy_23==1
 gen year =2023
 ***********************Dealing with outliers*************************
 
-tabstat ha_planted field_size quant_harv_kg value_harvest  inorg_fert_kg n_kg_plot [w=weight], statistics( mean median sd min max ) columns(statistics)
+tabstat ha_planted field_size quant_harv_kg value_harvest  inorg_fert_kg n_kg_plot herbicide pesticide org_fert animal_tract mechanization irrigation tractors flat_slope steep_slope slope_slope   [w=weight], statistics( mean median sd min max ) columns(statistics)
 count
-misstable summarize ha_planted field_size quant_harv_kg value_harvest  inorg_fert_kg n_kg_plot
+misstable summarize ha_planted field_size quant_harv_kg value_harvest  inorg_fert_kg n_kg_plot herbicide pesticide org_fert animal_tract mechanization irrigation tractors flat_slope steep_slope slope_slope 
 
 
 replace inorg_fert_kg = 0 if inorg_fert_kg==.
@@ -1969,7 +2881,7 @@ replace quant_harv_kg = 0 if quant_harv_kg ==.
 
 
 
-misstable summarize ha_planted field_size quant_harv_kg value_harvest  inorg_fert_kg n_kg_plot
+misstable summarize ha_planted field_size quant_harv_kg value_harvest  inorg_fert_kg n_kg_plot herbicide pesticide org_fert animal_tract mechanization irrigation tractors flat_slope steep_slope slope_slope 
 
 
 append using "C:\Users\obine\Music\Documents\food\evans/checking_plot.dta"
@@ -2024,12 +2936,19 @@ foreach v of varlist  n_rate  {
 	lab var  `v'_w  "`l`v'' - Winzorized top & bottom 1%"
 }
 
+gen good_soil_plant = ha_planted if ha_planted !=. & good==1
+gen fair_soil_plant = ha_planted if ha_planted !=. & fair==1
+gen poor_soil_plant = ha_planted if ha_planted !=. & poor==1
 
-misstable summarize ha_planted field_size quant_harv_kg yield_plot value_harvest productivity_w   inorg_fert_kg n_kg_plot fert_rate n_rate      productivity 
+replace good_soil_plant = 0 if good_soil_plant ==.
+replace fair_soil_plant = 0 if fair_soil_plant ==.
+replace poor_soil_plant = 0 if poor_soil_plant ==.
+
+misstable summarize ha_planted field_size quant_harv_kg yield_plot value_harvest productivity_w   inorg_fert_kg n_kg_plot fert_rate n_rate      productivity  good fair poor good_soil_plant fair_soil_plant poor_soil_plant herbicide pesticide org_fert animal_tract mechanization irrigation tractors flat_slope steep_slope slope_slope 
 preserve
 
 keep if year ==2018
-tabstat ha_planted field_size quant_harv_kg yield_plot value_harvest productivity_w   inorg_fert_kg n_kg_plot fert_rate n_rate n_rate_w productivity   [w=weight], statistics( mean median sd min max ) columns(statistics)
+tabstat ha_planted field_size quant_harv_kg yield_plot value_harvest productivity_w   inorg_fert_kg n_kg_plot fert_rate n_rate n_rate_w productivity good fair poor good_soil_plant fair_soil_plant poor_soil_plant herbicide pesticide org_fert animal_tract mechanization irrigation tractors flat_slope steep_slope slope_slope   [w=weight], statistics( mean median sd min max ) columns(statistics)
 count
 restore
 
@@ -2037,7 +2956,7 @@ restore
 preserve
 
 keep if year ==2023
-tabstat ha_planted field_size quant_harv_kg yield_plot value_harvest productivity_w   inorg_fert_kg n_kg_plot fert_rate n_rate n_rate_w productivity   [w=weight], statistics( mean median sd min max ) columns(statistics)
+tabstat ha_planted field_size quant_harv_kg yield_plot value_harvest productivity_w   inorg_fert_kg n_kg_plot fert_rate n_rate n_rate_w productivity good fair poor good_soil_plant fair_soil_plant poor_soil_plant herbicide pesticide org_fert animal_tract mechanization  irrigation tractors flat_slope steep_slope slope_slope   [w=weight], statistics( mean median sd min max ) columns(statistics)
 count
 restore
 
@@ -2051,15 +2970,355 @@ bysort hhid plot_id: egen sum_4waves_com_fer_bin = sum(commercial_dummy)
 
 **********************************
 
-* Step 1: Keep only relevant years
-keep if year == 2018 | year == 2023
+**********************************
+ttest ha_planted, by(year) unequal
+ttest field_size, by(year) unequal
+ttest quant_harv_kg, by(year) unequal
+ttest yield_plot, by(year) unequal
+ttest value_harvest, by(year) unequal
+ttest productivity_w, by(year) unequal
 
-* Step 2: Reshape wide by household
-reshape wide quant_harv_kg yield_plot value_harvest, i(hhid) j(year)
+ttest inorg_fert_kg, by(year) unequal
+ttest n_kg_plot, by(year) unequal
+ttest n_rate_w, by(year) unequal
 
-* Step 3: Paired t-tests for each variable
-ttest quant_harv_kg2023 == quant_harv_kg2018
-ttest yield_plot2023 == yield_plot2018
-ttest value_harvest2023 == value_harvest2018
-ttest inorg_fert_kg2023 == inorg_fert_kg2018
-ttest n_kg2023 == n_kg2018
+ttest good, by(year) unequal
+ttest fair, by(year) unequal
+ttest poor, by(year) unequal
+ttest good_soil_plant, by(year) unequal
+ttest fair_soil_plant, by(year) unequal
+ttest poor_soil_plant, by(year) unequal
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// yield_plot value_harvest productivity_w 
+
+  
+
+* Generate interaction term
+gen year2023 = (year == 2023)
+*gen mrk_dist_w23 = mrk_dist_w *year2023
+gen nitrogen23 = n_rate_w* year2023
+gen nitrogen2 = n_rate_w* n_rate_w
+gen nitrogen223 = nitrogen2* year2023
+egen plotid = concat(hhid plot_id), punct("-")
+gen lproductivity_w = log(productivity_w + 1)
+
+//////////////////////////////////////Regression//////////////////////////////
+save "C:\Users\obine\Music\Documents\food_secure\dofile\maize_plot_dofile.dta", replace
+
+
+
+
+************************************************************************************************************************
+*Model Specification Using Nitrogen
+************************************************************************************************************************
+use "C:\Users\obine\Music\Documents\food_secure\dofile\maize_plot_dofile.dta", clear
+
+
+
+*-----------------------------
+* DID regression without controls
+*-----------------------------
+eststo clear
+reg yield_plot n_rate_w nitrogen2 year2023  , cluster(plotid)
+eststo model1
+*no controls
+reg yield_plot n_rate_w nitrogen2 year2023 good fair  ha_planted herbicide pesticide org_fert irrigation flat_slope slope_slope, cluster(plotid)
+eststo model2
+
+* DID regression with controls + district fixed effects
+reg yield_plot n_rate_w nitrogen2 year2023 good fair  ha_planted herbicide pesticide org_fert irrigation flat_slope slope_slope i.zone, cluster(plotid)
+eststo model3
+*-----------------------------
+* Export all results into one DOCX file
+*-----------------------------
+esttab m* using "C:\Users\obine\Music\Documents\Project_25\Table03m.regression.rtf", label replace cells(b(star fmt(%9.2f)) se(par fmt(%9.2f)))
+
+
+
+
+
+
+*-----------------------------
+* DID regression without controls
+*-----------------------------
+eststo clear
+reg productivity_w n_rate_w nitrogen2 year2023  , cluster(plotid)
+eststo model1
+*no controls
+reg productivity_w n_rate_w nitrogen2 year2023 good fair  ha_planted herbicide pesticide org_fert irrigation flat_slope slope_slope, cluster(plotid)
+eststo model2
+
+* DID regression with controls + district fixed effects
+reg productivity_w n_rate_w nitrogen2 year2023 good fair  ha_planted herbicide pesticide org_fert irrigation flat_slope slope_slope i.zone, cluster(plotid)
+eststo model3
+*-----------------------------
+* Export all results into one DOCX file
+*-----------------------------
+esttab m* using "C:\Users\obine\Music\Documents\Project_25\Table01m.regression.rtf", label replace cells(b(star fmt(%9.2f)) se(par fmt(%9.2f)))
+
+
+
+************************************************************************************************************************************************************************************************************************************************
+
+ // animal_tract mechanization  tractors 
+
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ /*
+ 
+************************************************************************************************************************
+*Model Specification Using Nitrogen
+************************************************************************************************************************
+use "C:\Users\obine\Music\Documents\food_secure\dofile\maize_plot_dofile.dta", clear
+
+
+
+*-----------------------------
+* DID regression without controls
+*-----------------------------
+eststo clear
+reg yield_plot n_rate_w nitrogen2  year2023  , cluster(plotid)
+eststo model11
+reg yield_plot nitrogen23  year2023  , cluster(plotid)
+eststo model1
+*no controls
+reg yield_plot nitrogen23  year2023  n_rate_w  nitrogen2 good fair  ha_planted herbicide pesticide org_fert irrigation flat_slope slope_slope, cluster(plotid)
+eststo model2
+
+* DID regression with controls + district fixed effects
+reg yield_plot nitrogen23  year2023  n_rate_w  nitrogen2 good fair  ha_planted herbicide pesticide org_fert irrigation flat_slope slope_slope i.zone, cluster(plotid)
+eststo model3
+*-----------------------------
+* Export all results into one DOCX file
+*-----------------------------
+esttab m* using "C:\Users\obine\Music\Documents\Project_25\Table03m.regression.rtf", label replace cells(b(star fmt(%9.2f)) se(par fmt(%9.2f)))
+
+
+
+
+
+
+*-----------------------------
+* DID regression without controls
+*-----------------------------
+eststo clear
+reg lproductivity_w n_rate_w  year2023  , cluster(plotid)
+reg lproductivity_w n_rate_w nitrogen2 year2023  , cluster(plotid)
+eststo model11
+reg lproductivity_w nitrogen23  year2023  , cluster(plotid)
+eststo model1
+*no controls
+reg lproductivity_w nitrogen23   year2023 nitrogen2 n_rate_w   good fair  ha_planted herbicide pesticide org_fert irrigation flat_slope slope_slope, cluster(plotid)
+eststo model2
+
+* DID regression with controls + district fixed effects
+reg lproductivity_w nitrogen23  year2023  nitrogen2 n_rate_w   good fair  ha_planted herbicide pesticide org_fert irrigation flat_slope slope_slope i.zone, cluster(plotid)
+eststo model3
+*-----------------------------
+* Export all results into one DOCX file
+*-----------------------------
+esttab m* using "C:\Users\obine\Music\Documents\Project_25\Table01m.regression.rtf", label replace cells(b(star fmt(%9.2f)) se(par fmt(%9.2f)))
+
+
+
+
+
+
+*-----------------------------
+* DID regression without controls
+*-----------------------------
+eststo clear
+reg productivity_w nitrogen2  year2023  , cluster(plotid)
+eststo model11
+reg productivity_w nitrogen223  year2023  , cluster(plotid)
+eststo model1
+*no controls
+reg productivity_w nitrogen223  year2023  n_rate_w  nitrogen2 good fair  ha_planted herbicide pesticide org_fert irrigation flat_slope slope_slope, cluster(plotid)
+eststo model2
+
+* DID regression with controls + district fixed effects
+reg productivity_w nitrogen223  year2023  n_rate_w  nitrogen2 good fair  ha_planted herbicide pesticide org_fert irrigation flat_slope slope_slope i.zone, cluster(plotid)
+eststo model3
+*-----------------------------
+* Export all results into one DOCX file
+*-----------------------------
+esttab m* using "C:\Users\obine\Music\Documents\Project_25\Table01m.regression.rtf", label replace cells(b(star fmt(%9.2f)) se(par fmt(%9.2f)))
+
+
+************************************************************************************************************************************************************************************************************************************************
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+************************************************************************************************************************
+*Model Specification Using Market distance Prices
+************************************************************************************************************************
+use "C:\Users\obine\Music\Documents\food_secure\dofile\maize_plot_dofile.dta", clear
+
+
+
+
+*-----------------------------
+* DID regression without controls
+*-----------------------------
+eststo clear
+reg yield_plot mrk_dist_w23  year2023  , cluster(hhid)
+eststo model1
+*no controls
+reg yield_plot mrk_dist_w23  year2023  mrk_dist_w  real_maize_price_mr good fair  total_qty real_hhvalue ha_planted num_mem hh_headage femhead attend_sch worker, cluster(hhid)
+eststo model2
+
+* DID regression with controls + district fixed effects
+reg yield_plot mrk_dist_w23  year2023 mrk_dist_w   real_maize_price_mr good fair  total_qty real_hhvalue ha_planted num_mem hh_headage femhead attend_sch worker i.zone, cluster(hhid)
+
+areg yield_plot mrk_dist_w23  year2023  mrk_dist_w  real_maize_price_mr good fair  total_qty real_hhvalue ha_planted num_mem hh_headage femhead attend_sch worker, absorb(zone) cluster(hhid)
+eststo model3
+*-----------------------------
+* Export all results into one DOCX file
+*-----------------------------
+esttab m* using "C:\Users\obine\Music\Documents\Project_25\Table03m.regression.rtf", label replace cells(b(star fmt(%9.2f)) se(par fmt(%9.2f)))
+
+
+
+
+
+
+*-----------------------------
+* DID regression without controls
+*-----------------------------
+eststo clear
+reg productivity_w mrk_dist_w23  year2023  , cluster(hhid)
+eststo model1
+*no controls
+reg productivity_w mrk_dist_w23  year2023  mrk_dist_w  real_maize_price_mr good fair  total_qty real_hhvalue ha_planted num_mem hh_headage femhead attend_sch worker, cluster(hhid)
+eststo model2
+
+* DID regression with controls + district fixed effects
+reg productivity_w mrk_dist_w23  year2023 mrk_dist_w   real_maize_price_mr good fair  total_qty real_hhvalue ha_planted num_mem hh_headage femhead attend_sch worker i.zone, cluster(hhid)
+
+areg productivity_w mrk_dist_w23  year2023  mrk_dist_w  real_maize_price_mr good fair  total_qty real_hhvalue ha_planted num_mem hh_headage femhead attend_sch worker, absorb(zone) cluster(hhid)
+eststo model3
+*-----------------------------
+* Export all results into one DOCX file
+*-----------------------------
+esttab m* using "C:\Users\obine\Music\Documents\Project_25\Table01m.regression.rtf", label replace cells(b(star fmt(%9.2f)) se(par fmt(%9.2f)))
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -41,7 +41,7 @@ gen rural = (sector==2)
 lab var rural "1= Rural"
 keep hhid zone state lga ea wt_wave4 rural
 ren wt_wave4 weight
-collapse (max) weight, by (hhid)
+duplicates report hhid
 save  "${Nigeria_GHS_W4_created_data}/weight.dta", replace
 
 
@@ -561,7 +561,7 @@ la var fdspiceby "Spices and condiments auto-consumption"
 la var fdothpr "Food items not mentioned above auto-consumption"
 
 
-merge 1:1 hhid using `hhexp', nogen
+*merge 1:1 hhid using `hhexp', nogen
 unab varlist : *_def 
 local vars_nom : subinstr local varlist "_def" "", all 
 egen totcons = rowtotal(`vars_nom')
@@ -898,7 +898,7 @@ la var fdspiceby "Spices and condiments auto-consumption"
 la var fdothpr "Food items not mentioned above auto-consumption"
 
 
-merge 1:1 hhid using `hhexp', nogen
+*merge 1:1 hhid using `hhexp', nogen
 unab varlist : *_def 
 local vars_nom : subinstr local varlist "_def" "", all 
 egen totcons = rowtotal(`vars_nom')
@@ -923,7 +923,8 @@ ren totcons totcons_ph
 ren totcons_def totcons_def_ph
 ren totcons_pc totcons_pc_ph 
 ren totcons_adj totcons_adj_ph 
-gen totcons = (totcons_pp+totcons_ph)/2
+//gen totcons = (totcons_pp+totcons_ph)/2
+gen totcons = totcons_pp/2
 gen totcons_def = (totcons_def_pp+totcons_def_ph)/2
 gen totcons_pc = (totcons_pc_pp+totcons_pc_ph)/2
 gen totcons_adj = (totcons_adj_ph+totcons_pc_pp)/2
@@ -1485,14 +1486,87 @@ replace tpricefert_cens_mrk = medianfert_pr_zone if tpricefert_cens_mrk ==. & nu
 
 
 
+********Distance to institute of purchased fertilizer
+gen distance = s11c3q7 if inputid >=2 & inputid <=4
+tab distance
+replace distance = . if distance== 0
+tab distance
 
-collapse (sum) total_qty n_kg p_kg (max) tpricefert_cens_mrk, by( hhid)
+egen medianfert_dist_ea = median(distance), by (ea)
+egen medianfert_dist_lga = median(distance), by (lga)
+egen medianfert_dist_state = median(distance), by (state)
+egen medianfert_dist_zone = median(distance), by (zone)
+egen medianfert_dist_sector = median(distance), by (sector)
+
+
+egen num_fert_dist_ea = count(distance), by (ea)
+egen num_fert_dist_lga = count(distance), by (lga)
+egen num_fert_dist_state = count(distance), by (state)
+egen num_fert_dist_zone = count(distance), by (zone)
+egen num_fert_dist_sector = count(distance), by (sector)
+
+
+tab medianfert_dist_ea
+tab medianfert_dist_lga
+tab medianfert_dist_state
+tab medianfert_dist_zone
+
+
+
+tab num_fert_dist_ea
+tab num_fert_dist_lga
+tab num_fert_dist_state
+tab num_fert_dist_zone
+
+gen mrk_dist = distance
+
+replace mrk_dist = medianfert_dist_ea if mrk_dist ==. & num_fert_dist_ea >= 20
+
+tab mrk_dist,missing
+
+
+replace mrk_dist = medianfert_dist_lga if mrk_dist ==. & num_fert_dist_lga >= 20
+
+tab mrk_dist,missing
+
+
+
+replace mrk_dist = medianfert_dist_state if mrk_dist ==. & num_fert_dist_state >= 20
+
+tab mrk_dist,missing
+
+
+replace mrk_dist = medianfert_dist_zone if mrk_dist ==. & num_fert_dist_zone >= 20
+
+tab mrk_dist,missing
+replace mrk_dist = medianfert_dist_sector if mrk_dist ==. & num_fert_dist_sector >= 20
+
+tab mrk_dist,missing
+
+
+collapse (sum) total_qty n_kg p_kg (max) mrk_dist tpricefert_cens_mrk, by( hhid)
 replace  total_qty = 3525 if total_qty >= 3525
 replace n_kg = 800 if n_kg >=800
 
 gen real_tpricefert_cens_mrk = tpricefert_cens_mrk /0.4574889
 
 sum tpricefert_cens_mrk real_tpricefert_cens_mrk, detail
+
+
+************winzonrizing fertilizer distance
+foreach v of varlist  mrk_dist  {
+	_pctile `v'  , p(1 99) //[aw=weight]
+	gen `v'_w=`v'
+	*replace  `v'_w = r(r1) if  `v'_w < r(r1) &  `v'_w!=.
+	replace  `v'_w = r(r2) if  `v'_w > r(r2) &  `v'_w!=.
+	local l`v' : var lab `v'
+	lab var  `v'_w  "`l`v'' - Winzorized top & bottom 1%"
+}
+
+tab mrk_dist
+tab mrk_dist_w, missing
+sum mrk_dist mrk_dist_w, detail
+la var mrk_dist_w "distance to the nearest market in km"
 
 save "${Nigeria_GHS_W4_created_data}/fert_units.dta", replace
 
@@ -1527,7 +1601,18 @@ gen nitrogen_urea = qtyurea*0.46
 
 egen n_kg_plot = rowtotal(nitrogen_npk nitrogen_urea)
 
-collapse (sum) inorg_fert_kg n_kg_plot, by( hhid plot_id)
+
+
+
+gen  herbicide = (s11c2q10 ==1)
+gen  pesticide = (s11c2q1 ==1)
+gen  org_fert = (s11dq36 ==1)
+gen  animal_tract = (s11c2q19 ==1)
+gen  mechanization = (s11c2q27 ==1)
+
+
+
+collapse (sum) inorg_fert_kg n_kg_plot  (max) herbicide pesticide org_fert animal_tract mechanization, by( hhid plot_id)
 
 save "${Nigeria_GHS_W4_created_data}/fert_used.dta", replace
 
@@ -1721,7 +1806,7 @@ save "${Nigeria_GHS_W4_created_data}\household_asset_2018.dta", replace
 
 
 
-/*
+
 
 *********************************
 *Demographics 
@@ -1732,13 +1817,13 @@ save "${Nigeria_GHS_W4_created_data}\household_asset_2018.dta", replace
 use "${Nigeria_GHS_W4_raw_data}\sect1_plantingw4.dta",clear 
 
 
-merge 1:1 hhid indiv using "${Nigeria_GHS_W4_raw_data}\sect2_harvestw4.dta", gen(household)
+merge 1:1 hhid indiv using "${Nigeria_GHS_W4_raw_data}\sect2_harvestw4.dta" //, gen(household)
 
-merge m:1 zone state lga sector ea using "${Nigeria_GHS_W4_created_data}\market_distance.dta", keepusing (median_lga median_state median_zone mrk_dist1)
+*merge m:1 zone state lga sector ea using "${Nigeria_GHS_W4_created_data}\market_distance.dta", keepusing (median_lga median_state median_zone mrk_dist1)
 
-merge m:1 hhid using "${Nigeria_GHS_W4_created_data}/ag_rainy_18.dta", gen(filter)
+*merge m:1 hhid using "${Nigeria_GHS_W4_created_data}/ag_rainy_18.dta", gen(filter)
 
-keep if ag_rainy_18==1
+*keep if ag_rainy_18==1
 **************
 *market distance
 *************
@@ -1862,40 +1947,17 @@ tab pry_edu if s1q3==1 , missing
 tab finish_pry if s1q3==1 , missing 
 tab finish_sec if s1q3==1 , missing
 
-collapse (sum) num_mem (max) mrk_dist1 hh_headage femhead attend_sch  pry_edu finish_pry finish_sec, by (hhid)
+collapse (sum) num_mem (max)  hh_headage femhead attend_sch  pry_edu finish_pry finish_sec, by (hhid)
 
 merge 1:1 hhid using "${Nigeria_GHS_W4_created_data}/weight.dta", gen(wgt)
 
-merge 1:1 hhid using "${Nigeria_GHS_W4_created_data}/ag_rainy_18.dta", gen(filter)
+*merge 1:1 hhid using "${Nigeria_GHS_W4_created_data}/ag_rainy_18.dta", gen(filter)
 
-keep if ag_rainy_18==1
-
-
-tab mrk_dist1, missing
-************winzonrizing distance to market
-egen median_hhid = median(mrk_dist1), by (hhid)
-replace mrk_dist1 = median_hhid if mrk_dist1==.
-tab mrk_dist1, missing
+*keep if ag_rainy_18==1
 
 
 
-
-foreach v of varlist  mrk_dist1  {
-	_pctile `v' [aw=weight] , p(1 99) 
-	gen `v'_w=`v'
-	*replace  `v'_w = r(r1) if  `v'_w < r(r1) &  `v'_w!=.
-	replace  `v'_w = r(r2) if  `v'_w > r(r2) &  `v'_w!=.
-	local l`v' : var lab `v'
-	lab var  `v'_w  "`l`v'' - Winzorized top & bottom 5%"
-}
-
-
-tab mrk_dist1
-tab mrk_dist1_w, missing
-sum mrk_dist1 mrk_dist1_w, detail
-
-
-keep hhid mrk_dist1_w num_mem femhead hh_headage attend_sch pry_edu finish_pry finish_sec
+keep hhid  num_mem femhead hh_headage attend_sch pry_edu finish_pry finish_sec
 
 tab attend_sch, missing
 egen mid_attend= median(attend_sch)
@@ -1916,7 +1978,7 @@ replace finish_sec = mid_finish_sec if finish_sec==.
 
 
 la var num_mem "household size"
-la var mrk_dist1_w "distance to the nearest market in km"
+
 la var femhead  "=1 if head is female"
 la var hh_headage "age of household head in years"
 la var attend_sch"=1 if respondent attended school"
@@ -1925,5 +1987,243 @@ la var finish_pry "=1 if household head finished pry school"
 la var finish_sec "=1 if household head finished sec school"
 save "${Nigeria_GHS_W4_created_data}\demographics_2018.dta", replace
 
+*/
 
 
+********************************* 
+*Labor Age 
+*********************************
+use "${Nigeria_GHS_W4_raw_data}\sect1_plantingw4.dta",clear 
+merge m:1 hhid using "${Nigeria_GHS_W4_created_data}/ag_rainy_18.dta", gen(filter)
+
+keep if ag_rainy_18==1
+ren s1q6 hh_age
+
+gen worker = 1
+replace worker = 0 if hh_age < 15 | hh_age > 65
+
+tab worker,missing
+sort hhid
+collapse (sum) worker, by (hhid)
+la var worker "number of members age 15 and older and less than 65"
+sort hhid
+
+save "${Nigeria_GHS_W4_created_data}\laborage_2018.dta", replace
+
+
+
+
+
+*******************************
+*Soil Quality
+*******************************
+
+//ALT IMPORTANT NOTE: As of W4, the implied area conversions for farmer estimated units (including hectares) are markedly different from previous waves. I recommend excluding plots that do not have GPS measured areas from any area-based productivity estimates.
+use "${Nigeria_GHS_W4_raw_data}/sect11a1_plantingw4.dta", clear
+*merging in planting section to get cultivated status
+merge 1:1 hhid plotid using "${Nigeria_GHS_W4_raw_data}/sect11b1_plantingw4.dta", nogen
+*merging in harvest section to get areas for new plots
+merge 1:1 hhid plotid using "${Nigeria_GHS_W4_raw_data}/secta1_harvestw4.dta", gen(plot_merge)
+ 
+ren s11aq4aa area_size
+ren s11aq4b area_unit
+ren sa1q11 area_size2 //GPS measurement, no units in file
+//ren sa1q9b area_unit2 //Not in file
+ren s11aq4c area_meas_sqm
+//ren sa1q9c area_meas_sqm2
+gen cultivate = s11b1q27 ==1 
+
+
+gen field_size= area_size if area_unit==6
+replace field_size = area_size*0.0667 if area_unit==4									//reported in plots
+replace field_size = area_size*0.404686 if area_unit==5		    						//reported in acres
+replace field_size = area_size*0.0001 if area_unit==7									//reported in square meters
+
+replace field_size = area_size*0.00012 if area_unit==1 & zone==1						//reported in heaps
+replace field_size = area_size*0.00016 if area_unit==1 & zone==2
+replace field_size = area_size*0.00011 if area_unit==1 & zone==3
+replace field_size = area_size*0.00019 if area_unit==1 & zone==4
+replace field_size = area_size*0.00021 if area_unit==1 & zone==5
+replace field_size = area_size*0.00012 if area_unit==1 & zone==6
+
+replace field_size = area_size*0.0027 if area_unit==2 & zone==1							//reported in ridges
+replace field_size = area_size*0.004 if area_unit==2 & zone==2
+replace field_size = area_size*0.00494 if area_unit==2 & zone==3
+replace field_size = area_size*0.0023 if area_unit==2 & zone==4
+replace field_size = area_size*0.0023 if area_unit==2 & zone==5
+replace field_size = area_size*0.00001 if area_unit==2 & zone==6
+
+replace field_size = area_size*0.00006 if area_unit==3 & zone==1						//reported in stands
+replace field_size = area_size*0.00016 if area_unit==3 & zone==2
+replace field_size = area_size*0.00004 if area_unit==3 & zone==3
+replace field_size = area_size*0.00004 if area_unit==3 & zone==4
+replace field_size = area_size*0.00013 if area_unit==3 & zone==5
+replace field_size = area_size*0.00041 if area_unit==3 & zone==6
+
+
+
+/*ALT 02.23.23*/ gen area_est = field_size
+*replacing farmer reported with GPS if available
+replace field_size = area_meas_sqm*0.0001 if area_meas_sqm!=.               				
+gen gps_meas = (area_meas_sqm!=.)
+la var gps_meas "Plot was measured with GPS, 1=Yes"
+
+keep zone state lga sector ea hhid plotid field_size
+
+merge 1:1 hhid plotid using "${Nigeria_GHS_W4_raw_data}\sect11b1_plantingw4.dta"
+*merge m:1 hhid using "${Nigeria_GHS_W4_created_data}/ag_rainy_18.dta", gen(filter)
+
+*keep if ag_rainy_18==1
+
+ren s11b1q45 soil_quality
+tab soil_quality, missing
+order field_size soil_quality hhid 
+sort hhid
+
+
+egen max_fieldsize = max(field_size), by (hhid)
+replace max_fieldsize= . if max_fieldsize!= max_fieldsize
+order field_size soil_quality hhid max_fieldsize
+sort hhid
+keep if field_size== max_fieldsize
+sort hhid plotid field_size
+
+duplicates report hhid
+
+duplicates tag hhid, generate(dup)
+tab dup
+list field_size soil_quality dup
+
+
+list hhid plotid field_size soil_quality dup if dup>0
+
+egen soil_qty_rev = max(soil_quality) 
+gen soil_qty_rev2 = soil_quality
+
+replace soil_qty_rev2 = soil_qty_rev if dup>0
+
+list hhid plotid  field_size soil_quality soil_qty_rev soil_qty_rev2 dup if dup>0
+
+
+
+egen med_soil_ea = median(soil_qty_rev2), by (ea)
+egen med_soil_lga = median(soil_qty_rev2), by (lga)
+egen med_soil_state = median(soil_qty_rev2), by (state)
+egen med_soil_zone = median(soil_qty_rev2), by (zone)
+
+replace soil_qty_rev2= med_soil_ea if soil_qty_rev2==.
+tab soil_qty_rev2, missing
+replace soil_qty_rev2= med_soil_lga if soil_qty_rev2==.
+tab soil_qty_rev2, missing
+replace soil_qty_rev2= med_soil_state if soil_qty_rev2==.
+tab soil_qty_rev2, missing
+replace soil_qty_rev2= med_soil_zone if soil_qty_rev2==.
+tab soil_qty_rev2, missing
+
+replace soil_qty_rev2= 2 if soil_qty_rev2==1.5
+tab soil_qty_rev2, missing
+
+la define soil 1 "Good" 2 "fair" 3 "poor"
+
+*la value soil soil_qty_rev2
+
+collapse (mean) soil_qty_rev2 , by (hhid)
+la var soil_qty_rev2 "1=Good 2= fair 3=Bad "
+save "${Nigeria_GHS_W4_created_data}\soil_quality_2018.dta", replace
+
+
+
+
+
+
+
+
+
+*******************************
+*Soil Quality plot
+*******************************
+
+//ALT IMPORTANT NOTE: As of W4, the implied area conversions for farmer estimated units (including hectares) are markedly different from previous waves. I recommend excluding plots that do not have GPS measured areas from any area-based productivity estimates.
+use "${Nigeria_GHS_W4_raw_data}/sect11a1_plantingw4.dta", clear
+*merging in planting section to get cultivated status
+merge 1:1 hhid plotid using "${Nigeria_GHS_W4_raw_data}/sect11b1_plantingw4.dta", nogen
+*merging in harvest section to get areas for new plots
+merge 1:1 hhid plotid using "${Nigeria_GHS_W4_raw_data}/secta1_harvestw4.dta", gen(plot_merge)
+ 
+ren s11aq4aa area_size
+ren s11aq4b area_unit
+ren sa1q11 area_size2 //GPS measurement, no units in file
+//ren sa1q9b area_unit2 //Not in file
+ren s11aq4c area_meas_sqm
+//ren sa1q9c area_meas_sqm2
+gen cultivate = s11b1q27 ==1 
+
+
+gen field_size= area_size if area_unit==6
+replace field_size = area_size*0.0667 if area_unit==4									//reported in plots
+replace field_size = area_size*0.404686 if area_unit==5		    						//reported in acres
+replace field_size = area_size*0.0001 if area_unit==7									//reported in square meters
+
+replace field_size = area_size*0.00012 if area_unit==1 & zone==1						//reported in heaps
+replace field_size = area_size*0.00016 if area_unit==1 & zone==2
+replace field_size = area_size*0.00011 if area_unit==1 & zone==3
+replace field_size = area_size*0.00019 if area_unit==1 & zone==4
+replace field_size = area_size*0.00021 if area_unit==1 & zone==5
+replace field_size = area_size*0.00012 if area_unit==1 & zone==6
+
+replace field_size = area_size*0.0027 if area_unit==2 & zone==1							//reported in ridges
+replace field_size = area_size*0.004 if area_unit==2 & zone==2
+replace field_size = area_size*0.00494 if area_unit==2 & zone==3
+replace field_size = area_size*0.0023 if area_unit==2 & zone==4
+replace field_size = area_size*0.0023 if area_unit==2 & zone==5
+replace field_size = area_size*0.00001 if area_unit==2 & zone==6
+
+replace field_size = area_size*0.00006 if area_unit==3 & zone==1						//reported in stands
+replace field_size = area_size*0.00016 if area_unit==3 & zone==2
+replace field_size = area_size*0.00004 if area_unit==3 & zone==3
+replace field_size = area_size*0.00004 if area_unit==3 & zone==4
+replace field_size = area_size*0.00013 if area_unit==3 & zone==5
+replace field_size = area_size*0.00041 if area_unit==3 & zone==6
+
+
+
+/*ALT 02.23.23*/ gen area_est = field_size
+*replacing farmer reported with GPS if available
+replace field_size = area_meas_sqm*0.0001 if area_meas_sqm!=.               				
+gen gps_meas = (area_meas_sqm!=.)
+la var gps_meas "Plot was measured with GPS, 1=Yes"
+
+keep zone state lga sector ea hhid plotid field_size
+
+merge 1:1 hhid plotid using "${Nigeria_GHS_W4_raw_data}\sect11b1_plantingw4.dta"
+*merge m:1 hhid using "${Nigeria_GHS_W4_created_data}/ag_rainy_18.dta", gen(filter)
+
+*keep if ag_rainy_18==1
+
+ren s11b1q45 soil_quality
+tab soil_quality , missing
+order field_size soil_quality hhid 
+sort hhid
+
+tab field_size, missing
+tab soil_quality if field_size!=., missing
+
+gen good = (soil_quality==1)
+gen fair = (soil_quality==2)
+gen poor = (soil_quality==3)
+
+
+gen irrigation = (s11b1q39==1)
+tab s11b1q39
+gen tractors = (s11b1q11a==1)
+tab s11b1q11a
+gen flat_slope = (s11b1q46==1)
+gen steep_slope = (s11b1q46==4)
+gen slope_slope = (s11b1q46==2 | s11b1q46==3 )
+tab s11b1q46
+ren plotid plot_id
+collapse (max) good fair poor irrigation tractors flat_slope steep_slope slope_slope , by (hhid plot_id)
+tab good, missing
+tab fair, missing
+tab poor, missing
+save "${Nigeria_GHS_W4_created_data}\soil_quality_2018_plot.dta", replace
